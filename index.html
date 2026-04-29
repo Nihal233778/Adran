@@ -1,11 +1,13 @@
-    <!DOCTYPE html>
+       <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>🍪 Fortune Cookie | Telegram Mini App</title>
-    <!-- Telegram WebApp SDK (required for full Telegram features) -->
+    <title>🍪 Fortune Cookie + Ads | Telegram Mini App</title>
+    <!-- Telegram WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js?56"></script>
+    <!-- AdRadar SDK -->
+    <script src="https://adradar.xyz/sdk.js"></script>
     <style>
         * {
             margin: 0;
@@ -121,6 +123,12 @@
             margin-top: 8px;
         }
 
+        .ad-btn {
+            background: linear-gradient(135deg, #6a11cb, #2575fc);
+            color: white;
+            border: none;
+        }
+
         .counter {
             margin-top: 20px;
             font-size: 0.8rem;
@@ -128,12 +136,19 @@
             display: flex;
             justify-content: center;
             gap: 20px;
+            flex-wrap: wrap;
         }
 
         footer {
             margin-top: 24px;
             font-size: 0.7rem;
             opacity: 0.5;
+        }
+
+        .ad-warning {
+            font-size: 0.7rem;
+            color: #ff6b4a;
+            margin-top: 8px;
         }
     </style>
 </head>
@@ -154,24 +169,27 @@
     </div>
 
     <button id="crackBtn">🍪 Crack Fortune Cookie</button>
+    <button id="adRewardBtn" class="ad-btn">🎥 Watch Ad & Get +1 Fortune</button>
     <button id="shareBtn" class="secondary-btn">📤 Share My Fortune</button>
 
     <div class="counter">
         <span>🎲 Fortunes opened: <strong id="counterSpan">0</strong></span>
-        <span>⭐ Last luck: <strong id="lastLuckSpan">—</strong></span>
+        <span>⭐ Ad bonus fortunes: <strong id="adBonusSpan">0</strong></span>
+        <span>🍀 Last luck: <strong id="lastLuckSpan">—</strong></span>
     </div>
-    <footer>⚡ Works inside Telegram | Haptic feedback enabled</footer>
+    <div class="ad-warning" id="adStatus">💰 Watch an ad to earn extra fortune (reward grants +1)</div>
+    <footer>⚡ Telegram Mini App | Ads powered by AdRadar</footer>
 </div>
 
 <script>
-    // Wait for both DOM and Telegram SDK to be ready
+    // Wait for DOM and Telegram SDK
     (function() {
-        // Retrieve Telegram WebApp object
+        // Telegram WebApp
         const tg = window.Telegram?.WebApp;
         if (!tg) {
             console.warn("Telegram WebApp not loaded, using fallback mode.");
         } else {
-            tg.expand();        // use full screen
+            tg.expand();        // full screen
             tg.ready();         // tell Telegram we're ready
         }
 
@@ -181,23 +199,33 @@
         const luckyNumberSpan = document.getElementById('luckyNumber');
         const crackBtn = document.getElementById('crackBtn');
         const shareBtn = document.getElementById('shareBtn');
+        const adRewardBtn = document.getElementById('adRewardBtn');
         const counterSpan = document.getElementById('counterSpan');
+        const adBonusSpan = document.getElementById('adBonusSpan');
         const lastLuckSpan = document.getElementById('lastLuckSpan');
+        const adStatusSpan = document.getElementById('adStatus');
 
         // App state
-        let fortuneCount = 0;
+        let fortuneCount = 0;       // regular fortune cookie cracks
+        let adBonusCount = 0;       // extra fortunes earned via ads
         let lastFortune = "";
+        let lastLuckyNum = 0;
 
-        // Load saved count from localStorage (persists between sessions)
+        // Load saved data from localStorage
         try {
-            const saved = localStorage.getItem('fortune_counter');
-            if (saved && !isNaN(parseInt(saved))) {
-                fortuneCount = parseInt(saved);
+            const savedCount = localStorage.getItem('fortune_counter');
+            if (savedCount && !isNaN(parseInt(savedCount))) {
+                fortuneCount = parseInt(savedCount);
                 counterSpan.innerText = fortuneCount;
+            }
+            const savedAdBonus = localStorage.getItem('ad_bonus_count');
+            if (savedAdBonus && !isNaN(parseInt(savedAdBonus))) {
+                adBonusCount = parseInt(savedAdBonus);
+                adBonusSpan.innerText = adBonusCount;
             }
         } catch(e) {}
 
-        // List of 15 unique fortunes
+        // Fortunes list
         const fortunes = [
             "🌈 A pleasant surprise is waiting for you.",
             "💎 Someone is thinking of you with gratitude.",
@@ -216,51 +244,58 @@
             "🏆 A small win will lead to a bigger victory."
         ];
 
-        // Haptic feedback helper
+        // Haptic feedback
         function vibrateLight() {
-            if (tg && tg.HapticFeedback) {
-                tg.HapticFeedback.impactOccurred('light');
-            }
+            if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
         }
-
         function vibrateSuccess() {
-            if (tg && tg.HapticFeedback) {
-                tg.HapticFeedback.notificationOccurred('success');
+            if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+        }
+        function vibrateError() {
+            if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+        }
+
+        // Show a Telegram popup (or fallback alert)
+        function showMessage(title, message, isError = false) {
+            if (tg && tg.showPopup) {
+                tg.showPopup({ title, message, buttons: [{type: "ok"}] });
+            } else {
+                alert(`${title}: ${message}`);
             }
+            if (isError) vibrateError();
+            else vibrateSuccess();
         }
 
-        // Generate random fortune
+        // Get random fortune
         function getRandomFortune() {
-            const randomIndex = Math.floor(Math.random() * fortunes.length);
-            return fortunes[randomIndex];
+            return fortunes[Math.floor(Math.random() * fortunes.length)];
         }
 
-        // Update UI with a new fortune
+        // Update fortune display (core)
+        function displayFortune(fortuneTextStr, luckyNum) {
+            fortuneText.innerText = fortuneTextStr;
+            luckyNumberSpan.innerText = `🍀 Lucky number: ${luckyNum}`;
+            lastFortune = fortuneTextStr;
+            lastLuckyNum = luckyNum;
+            lastLuckSpan.innerText = luckyNum;
+            // animate box
+            const box = document.getElementById('fortuneBox');
+            box.style.transform = 'scale(0.98)';
+            setTimeout(() => { box.style.transform = ''; }, 150);
+        }
+
+        // Crack a new fortune (regular)
         function crackFortune() {
-            // increment counter
             fortuneCount++;
             counterSpan.innerText = fortuneCount;
             localStorage.setItem('fortune_counter', fortuneCount);
             
-            // get new fortune
             const newFortune = getRandomFortune();
-            lastFortune = newFortune;
-            const luckyNum = Math.floor(Math.random() * 50) + 1; // 1-50
+            const luckyNum = Math.floor(Math.random() * 50) + 1;
+            displayFortune(newFortune, luckyNum);
             
-            // display
-            fortuneText.innerText = newFortune;
-            luckyNumberSpan.innerText = `🍀 Lucky number: ${luckyNum}`;
-            lastLuckSpan.innerText = luckyNum;
-            
-            // add a tiny animation to the box
-            const box = document.getElementById('fortuneBox');
-            box.style.transform = 'scale(0.98)';
-            setTimeout(() => { box.style.transform = ''; }, 150);
-            
-            // haptic success
             vibrateSuccess();
             
-            // show Telegram popup (optional but confirms action)
             if (tg && tg.showPopup) {
                 tg.showPopup({
                     title: "🎉 Fortune Revealed!",
@@ -270,25 +305,77 @@
             }
         }
 
-        // Share the current fortune via Telegram
-        function shareFortune() {
-            if (!lastFortune) {
-                if (tg && tg.showPopup) {
-                    tg.showPopup({
-                        title: "No fortune yet",
-                        message: "Crack a cookie first! 🍪",
-                        buttons: [{type: "ok"}]
-                    });
-                } else {
-                    alert("Crack a cookie first!");
-                }
-                vibrateLight();
+        // Add ad bonus fortune (does not increment regular count, only bonus)
+        function addAdBonusFortune() {
+            adBonusCount++;
+            adBonusSpan.innerText = adBonusCount;
+            localStorage.setItem('ad_bonus_count', adBonusCount);
+            
+            const newFortune = getRandomFortune();
+            const luckyNum = Math.floor(Math.random() * 50) + 1;
+            displayFortune(newFortune, luckyNum);
+            
+            showMessage("🎁 Ad Reward Claimed!", `You earned an extra fortune!\n"${newFortune}"\nLucky number: ${luckyNum}`);
+        }
+
+        // Watch ad with reward
+        function watchAdAndReward() {
+            // Check if AdRadar is available
+            if (typeof AdRadar === 'undefined' || !AdRadar.showAd) {
+                showMessage("Ad SDK Error", "AdRadar not loaded yet. Please try again later.", true);
+                console.error("AdRadar SDK missing");
                 return;
             }
             
-            const shareText = `🍪 My fortune cookie says: "${lastFortune}" — what's yours?`;
+            vibrateLight();
+            adStatusSpan.innerText = "📺 Loading ad... please wait";
+            
+            try {
+                AdRadar.showAd({
+                    adUnitId: "69f24eed329966f763d01d66",
+                    onReward: function() {
+                        // User successfully watched the ad and earned reward
+                        addAdBonusFortune();
+                        adStatusSpan.innerText = "✅ Ad rewarded! +1 fortune earned!";
+                        vibrateSuccess();
+                        setTimeout(() => {
+                            adStatusSpan.innerText = "💰 Watch an ad to earn extra fortune (reward grants +1)";
+                        }, 3000);
+                    },
+                    onError: function(error) {
+                        console.error("Ad error:", error);
+                        adStatusSpan.innerText = "❌ Ad failed to load. Try again later.";
+                        showMessage("Ad Error", "Could not load ad. Please check your connection.", true);
+                        setTimeout(() => {
+                            adStatusSpan.innerText = "💰 Watch an ad to earn extra fortune (reward grants +1)";
+                        }, 3000);
+                    },
+                    onClose: function() {
+                        // Ad was closed without completing (optional)
+                        if (adStatusSpan.innerText !== "✅ Ad rewarded! +1 fortune earned!") {
+                            adStatusSpan.innerText = "⏸️ Ad closed early. No reward given.";
+                            setTimeout(() => {
+                                adStatusSpan.innerText = "💰 Watch an ad to earn extra fortune (reward grants +1)";
+                            }, 2000);
+                        }
+                    }
+                });
+            } catch(e) {
+                console.error("AdRadar exception:", e);
+                adStatusSpan.innerText = "⚠️ Ad error. Please try again.";
+                showMessage("Ad Error", "Something went wrong. Please try again later.", true);
+            }
+        }
+
+        // Share current fortune
+        function shareFortune() {
+            if (!lastFortune) {
+                showMessage("No fortune yet", "Crack a cookie first! 🍪");
+                vibrateLight();
+                return;
+            }
+            const shareText = `🍪 My fortune cookie says: "${lastFortune}" (lucky ${lastLuckyNum}) — what's yours?`;
             if (tg && tg.showPopup) {
-                // In Telegram Mini Apps, we can use share to story or copy
                 tg.showPopup({
                     title: "📤 Share",
                     message: "Copy this fortune to share with friends?",
@@ -299,7 +386,8 @@
                 }, (btnId) => {
                     if (btnId === "copy") {
                         navigator.clipboard.writeText(shareText).then(() => {
-                            tg.showToast({text: "Fortune copied! 🎉", duration: 1500});
+                            if (tg.showToast) tg.showToast({text: "Fortune copied! 🎉", duration: 1500});
+                            else alert("Fortune copied!");
                         });
                     }
                 });
@@ -310,7 +398,7 @@
             vibrateLight();
         }
 
-        // Load and display Telegram user data
+        // Load Telegram user info
         function displayTelegramUser() {
             if (tg && tg.initDataUnsafe) {
                 const user = tg.initDataUnsafe.user;
@@ -321,31 +409,29 @@
                     return;
                 }
             }
-            // fallback for browser testing
             userInfoDiv.innerHTML = `<span>👤 Tester Mode</span><span>🆔 demo_123</span>`;
         }
 
-        // event listeners
+        // Bind events
         crackBtn.addEventListener('click', crackFortune);
         shareBtn.addEventListener('click', shareFortune);
-        
-        // Initialize app
+        adRewardBtn.addEventListener('click', watchAdAndReward);
+
+        // Initialize
         displayTelegramUser();
         
-        // optional: auto show a welcome fortune if count=0
-        if (fortuneCount === 0) {
+        // Optional: welcome fortune if none
+        if (fortuneCount === 0 && adBonusCount === 0) {
             setTimeout(() => {
                 crackFortune();
             }, 300);
         }
 
-        // make sure Telegram main button is hidden if not used
-        if (tg && tg.MainButton) {
-            tg.MainButton.hide();
-        }
+        // Hide Telegram MainButton if present
+        if (tg && tg.MainButton) tg.MainButton.hide();
         
-        console.log("Fortune Cookie Mini App Loaded — Output visible!");
+        console.log("Fortune Cookie with AdRadar integration loaded. Ad unit ID: 69f24eed329966f763d01d66");
     })();
 </script>
 </body>
-</html>                      
+</html>                 
